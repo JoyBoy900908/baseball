@@ -1,0 +1,103 @@
+import cv2
+import mediapipe as mp
+import math
+
+# 初始化 MediaPipe Pose 模型
+mp_drawing = mp.solutions.drawing_utils
+mp_pose = mp.solutions.pose
+
+# 计算两个向量之间的夹角
+def calculate_angle(a, b, c):
+    ba = [a[0] - b[0], a[1] - b[1]]  # 向量 BA
+    bc = [c[0] - b[0], c[1] - b[1]]  # 向量 BC
+    dot_product = ba[0] * bc[0] + ba[1] * bc[1]
+    magnitude_ba = math.sqrt(ba[0]**2 + ba[1]**2)
+    magnitude_bc = math.sqrt(bc[0]**2 + bc[1]**2)
+    cos_angle = dot_product / (magnitude_ba * magnitude_bc)
+    angle = math.degrees(math.acos(cos_angle))
+    return angle
+
+# 检查角度是否在预设范围内
+def check_angle(name, actual_angle, min_angle, max_angle):
+    if actual_angle < min_angle:
+        return f"{name} angle too low ({actual_angle:.2f} degrees). Suggested: {min_angle}-{max_angle} degrees."
+    elif actual_angle > max_angle:
+        return f"{name} angle too high ({actual_angle:.2f} degrees). Suggested: {min_angle}-{max_angle} degrees."
+    else:
+        return f"{name} angle is correct ({actual_angle:.2f} degrees)."
+
+# 设置各关键关节的标准角度范围
+standard_ranges = {
+    'left_elbow': (80, 110),   # 投球过程中的肘部角度范围
+    'left_shoulder': (30, 90), # 投球时肩膀角度范围
+    'left_hip': (40, 80),      # 髋部的标准角度范围
+    'left_knee': (30, 90)      # 膝盖的标准角度范围
+}
+
+# 打开视频文件
+cap = cv2.VideoCapture("IMG_7239.MOV")
+
+# 使用 MediaPipe Pose 进行骨架检测
+with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(img_rgb)
+
+        if results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+
+            # 计算各关节角度
+            left_elbow_angle = calculate_angle(
+                [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x, landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+            )
+            left_shoulder_angle = calculate_angle(
+                [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+            )
+            left_hip_angle = calculate_angle(
+                [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x, landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
+            )
+            left_knee_angle = calculate_angle(
+                [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x, landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y], 
+                [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
+            )
+
+            # 检查角度与标准范围的差距并提供建议
+            feedback_elbow = check_angle('Left Elbow', left_elbow_angle, *standard_ranges['left_elbow'])
+            feedback_shoulder = check_angle('Left Shoulder', left_shoulder_angle, *standard_ranges['left_shoulder'])
+            feedback_hip = check_angle('Left Hip', left_hip_angle, *standard_ranges['left_hip'])
+            feedback_knee = check_angle('Left Knee', left_knee_angle, *standard_ranges['left_knee'])
+
+            # 输出反馈
+            print(feedback_elbow)
+            print(feedback_shoulder)
+            print(feedback_hip)
+            print(feedback_knee)
+
+            # 在图像上绘制骨架
+            mp_drawing.draw_landmarks(
+                frame, 
+                results.pose_landmarks, 
+                mp_pose.POSE_CONNECTIONS,
+                mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2)
+            )
+
+        # 显示处理后的图像
+        cv2.imshow('Pitcher Pose Analysis', frame)
+
+        if cv2.waitKey(5) & 0xFF == ord('q'):
+            break
+
+cap.release()
+cv2.destroyAllWindows()
